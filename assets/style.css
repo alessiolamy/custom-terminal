@@ -1,0 +1,289 @@
+/* ═══════════════════════════════════════════════════════
+   BLOOMBERG TERMINAL — Personal Edition
+   Colors: Bloomberg orange #FF6600, black #000000,
+           dark gray #1A1A1A, mid gray #2A2A2A,
+           text #E8E8E8, muted #888888
+   ═══════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+/* ── Root & reset ─────────────────────────────────────── */
+:root {
+    --bb-orange:   #FF6600;
+    --bb-orange2:  #FF8C00;
+    --bb-black:    #000000;
+    --bb-dark:     #0D0D0D;
+    --bb-panel:    #141414;
+    --bb-card:     #1C1C1C;
+    --bb-border:   #2E2E2E;
+    --bb-text:     #E0E0E0;
+    --bb-muted:    #777777;
+    --bb-green:    #00CC66;
+    --bb-red:      #FF3333;
+    --bb-yellow:   #FFCC00;
+    --bb-blue:     #3399FF;
+    --bb-mono:     'IBM Plex Mono', monospace;
+    --bb-sans:     'IBM Plex Sans', sans-serif;
+}
+
+/* Global background */
+.stApp, .main, [data-testid="stAppViewContainer"] {
+    background-color: var(--bb-dark) !important;
+    color: var(--bb-text) !important;
+    font-family: var(--bb-sans) !important;
+}
+
+/* Hide Streamlit chrome */
+#MainMenu, footer, header { visibility: hidden !important; }
+[data-testid="stToolbar"] { display: none !important; }
+
+/* ── Sidebar ──────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+    background-color: var(--bb-black) !important;
+    border-right: 1px solid var(--bb-orange) !important;
+}
+[data-testid="stSidebar"] * { color: var(--bb-text) !important; }
+
+.sidebar-header {
+    font-family: var(--bb-mono);
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: var(--bb-orange) !important;
+    letter-spacing: 0.15em;
+    padding: 0.5rem 0 0.25rem 0;
+    text-transform: uppercase;
+}
+.bb-logo {
+    background: var(--bb-orange);
+    color: var(--bb-black) !important;
+    font-weight: 700;
+    padding: 1px 5px;
+    margin-right: 6px;
+    border-radius: 2px;
+    font-size: 0.9rem;
+}
+.sidebar-clock {
+    font-family: var(--bb-mono);
+    font-size: 0.75rem;
+    color: var(--bb-muted) !important;
+    margin-top: 4px;
+}
+.sidebar-footer {
+    font-family: var(--bb-mono);
+    font-size: 0.65rem;
+    color: var(--bb-muted) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+/* Radio nav items */
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    font-family: var(--bb-mono) !important;
+    font-size: 0.82rem !important;
+    letter-spacing: 0.03em;
+    padding: 4px 0;
+}
+
+/* ── Auth screen ──────────────────────────────────────── */
+.auth-container {
+    text-align: center;
+    padding: 3rem 0 1.5rem;
+}
+.auth-logo {
+    font-family: var(--bb-mono);
+    font-size: 2.5rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+}
+.auth-logo-bb {
+    background: var(--bb-orange);
+    color: var(--bb-black);
+    padding: 2px 10px;
+    border-radius: 3px;
+    margin-right: 8px;
+}
+.auth-logo-text { color: var(--bb-text); }
+.auth-subtitle {
+    color: var(--bb-muted);
+    font-family: var(--bb-mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-top: 0.5rem;
+}
+.auth-card {
+    background: var(--bb-card);
+    border: 1px solid var(--bb-border);
+    border-top: 2px solid var(--bb-orange);
+    border-radius: 4px;
+    padding: 2rem;
+    margin-top: 1rem;
+}
+
+/* ── Page headers ─────────────────────────────────────── */
+.page-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--bb-orange);
+    padding-bottom: 8px;
+    margin-bottom: 1.2rem;
+}
+.page-title {
+    font-family: var(--bb-mono);
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--bb-orange);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+}
+.page-subtitle {
+    font-family: var(--bb-mono);
+    font-size: 0.7rem;
+    color: var(--bb-muted);
+    margin-left: auto;
+}
+
+/* ── Metric tiles ─────────────────────────────────────── */
+.metric-tile {
+    background: var(--bb-card);
+    border: 1px solid var(--bb-border);
+    border-left: 3px solid var(--bb-orange);
+    border-radius: 3px;
+    padding: 0.75rem 1rem;
+    font-family: var(--bb-mono);
+}
+.metric-label {
+    font-size: 0.65rem;
+    color: var(--bb-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.metric-value {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--bb-text);
+    margin: 2px 0;
+}
+.metric-change.up   { color: var(--bb-green); font-size: 0.8rem; }
+.metric-change.down { color: var(--bb-red);   font-size: 0.8rem; }
+.metric-change.flat { color: var(--bb-muted); font-size: 0.8rem; }
+
+/* ── Tables ───────────────────────────────────────────── */
+[data-testid="stDataFrame"], [data-testid="stTable"] {
+    background: var(--bb-card) !important;
+    border: 1px solid var(--bb-border) !important;
+    border-radius: 3px !important;
+    font-family: var(--bb-mono) !important;
+    font-size: 0.78rem !important;
+}
+
+/* ── Inputs & buttons ─────────────────────────────────── */
+input, textarea, select {
+    background-color: var(--bb-card) !important;
+    color: var(--bb-text) !important;
+    border: 1px solid var(--bb-border) !important;
+    font-family: var(--bb-mono) !important;
+    border-radius: 3px !important;
+}
+[data-testid="baseButton-primary"] {
+    background-color: var(--bb-orange) !important;
+    color: var(--bb-black) !important;
+    font-family: var(--bb-mono) !important;
+    font-weight: 600 !important;
+    border: none !important;
+    border-radius: 2px !important;
+    letter-spacing: 0.05em;
+}
+[data-testid="baseButton-secondary"] {
+    background-color: transparent !important;
+    color: var(--bb-orange) !important;
+    border: 1px solid var(--bb-orange) !important;
+    font-family: var(--bb-mono) !important;
+    border-radius: 2px !important;
+}
+
+/* ── Section cards ────────────────────────────────────── */
+.bb-card {
+    background: var(--bb-card);
+    border: 1px solid var(--bb-border);
+    border-radius: 3px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+}
+.bb-card-title {
+    font-family: var(--bb-mono);
+    font-size: 0.7rem;
+    color: var(--bb-orange);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--bb-border);
+    padding-bottom: 4px;
+}
+
+/* ── News items ───────────────────────────────────────── */
+.news-item {
+    border-bottom: 1px solid var(--bb-border);
+    padding: 0.6rem 0;
+}
+.news-headline {
+    font-family: var(--bb-sans);
+    font-size: 0.88rem;
+    color: var(--bb-text);
+    font-weight: 500;
+}
+.news-meta {
+    font-family: var(--bb-mono);
+    font-size: 0.65rem;
+    color: var(--bb-muted);
+    margin-top: 2px;
+}
+.news-source {
+    color: var(--bb-orange);
+    font-weight: 600;
+}
+
+/* ── Ticker tape ──────────────────────────────────────── */
+.ticker-bar {
+    background: var(--bb-black);
+    border-bottom: 1px solid var(--bb-orange);
+    font-family: var(--bb-mono);
+    font-size: 0.72rem;
+    padding: 4px 12px;
+    color: var(--bb-text);
+    overflow: hidden;
+    white-space: nowrap;
+    margin-bottom: 1rem;
+}
+.tick-up   { color: var(--bb-green); }
+.tick-down { color: var(--bb-red); }
+
+/* ── Tabs ─────────────────────────────────────────────── */
+[data-testid="stTabs"] button {
+    font-family: var(--bb-mono) !important;
+    font-size: 0.75rem !important;
+    color: var(--bb-muted) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+[data-testid="stTabs"] button[aria-selected="true"] {
+    color: var(--bb-orange) !important;
+    border-bottom-color: var(--bb-orange) !important;
+}
+
+/* ── Dividers ─────────────────────────────────────────── */
+hr { border-color: var(--bb-border) !important; }
+
+/* ── Scrollbar ────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bb-dark); }
+::-webkit-scrollbar-thumb { background: var(--bb-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bb-orange); }
+
+/* ── Expanders ────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    background: var(--bb-card) !important;
+    border: 1px solid var(--bb-border) !important;
+    border-radius: 3px !important;
+}
