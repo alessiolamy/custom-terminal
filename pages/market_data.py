@@ -12,7 +12,7 @@ from utils.data import (get_quote, get_history, get_multiple_quotes,
                         fmt_price, fmt_pct, fmt_large, color_class)
 
 WATCHLISTS = {
-    "My Watchlist":   ["ASML.AS","BRK-B","BLK","BE","CRWV","SNDK","SXR8.DE","XADUSD=X","TSM"],
+    "My Watchlist":   ["ASML.AS","BRK-B","BLK","BE","CRWV","SNDK","SXR8.DE","XAD1.MI","TSM"],
     "Global Indices": ["^GSPC","^DJI","^IXIC","^FTSE","^GDAXI","^N225","^HSI"],
     "US Equities":    ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA",
                        "JPM","LMT","CVX","BLK","BRK-B","BE","CRWV","SNDK","TSM"],
@@ -21,12 +21,12 @@ WATCHLISTS = {
     "FX":             ["EURUSD=X","GBPUSD=X","USDJPY=X","USDCHF=X","DX-Y.NYB"],
     "Crypto":         ["BTC-USD","ETH-USD","SOL-USD","BNB-USD"],
     "Commodities":    ["GC=F","SI=F","CL=F","NG=F","ZW=F"],
-    "Futures":        ["SXR8.DE","XADUSD=X","NQ=F","ES=F","YM=F"],
+    "Futures":        ["SXR8.DE","XAD1.MI","NQ=F","ES=F","YM=F"],
 }
 
 # Suggested tickers for the chart dropdown
 CHART_SUGGESTIONS = [
-    "^GSPC","^DJI","^IXIC","SXR8.DE","XADUSD=X","NQ=F",
+    "^GSPC","^DJI","^IXIC","SXR8.DE","XAD1.MI","NQ=F",
     "ASML.AS","BRK-B","BLK","BE","CVX","CRWV","JPM","LMT","SNDK","TSM",
     "AAPL","MSFT","NVDA","AMZN","META","TSLA",
     "BTC-USD","ETH-USD","GC=F","CL=F","EURUSD=X",
@@ -227,7 +227,7 @@ def render():
     # ── Full quote table ───────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="bb-card-title">Quote Table</div>', unsafe_allow_html=True)
-    default_tickers = "ASML.AS,BRK-B,BLK,BE,CVX,CRWV,JPM,LMT,SNDK,TSM,SXR8.DE,NQ=F,GC=F,BTC-USD"
+    default_tickers = "ASML.AS,BRK-B,BLK,BE,CVX,CRWV,JPM,LMT,SNDK,TSM,SXR8.DE,XAD1.MI,"
     custom_tickers = st.text_input(
         "Tickers (comma-separated)", value=default_tickers,
         help="Any Yahoo Finance ticker symbol"
