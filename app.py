@@ -20,26 +20,32 @@ with open("assets/style.css", encoding="utf-8") as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
+def _get_secret(key: str) -> str:
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.environ.get(key, "")
+
 def check_password(pw: str) -> bool:
     import hashlib, hmac
-    stored = ""
-    try:
-        stored = st.secrets["APP_PASSWORD_HASH"]
-    except Exception:
-        stored = os.environ.get("APP_PASSWORD_HASH", "")
+    stored = _get_secret("APP_PASSWORD_HASH")
+    h = hashlib.sha256(pw.encode()).hexdigest()
+    return hmac.compare_digest(h, stored)
+
+def check_demo_password(pw: str) -> bool:
+    """Demo password — skips TOTP entirely, for recruiters."""
+    import hashlib, hmac
+    stored = _get_secret("DEMO_PASSWORD_HASH")
+    if not stored:
+        return False
     h = hashlib.sha256(pw.encode()).hexdigest()
     return hmac.compare_digest(h, stored)
 
 def check_totp(code: str) -> bool:
-    secret = ""
-    try:
-        secret = st.secrets["TOTP_SECRET"]
-    except Exception:
-        secret = os.environ.get("TOTP_SECRET", "")
+    secret = _get_secret("TOTP_SECRET")
     if not secret:
         return False
-    totp = pyotp.TOTP(secret)
-    return totp.verify(code, valid_window=1)
+    return pyotp.TOTP(secret).verify(code, valid_window=1)
 
 def auth_gate():
     if st.session_state.get("authenticated"):
@@ -65,7 +71,13 @@ def auth_gate():
             pw = st.text_input("Password", type="password", key="pw_input",
                                placeholder="Enter your password")
             if st.button("Continue", use_container_width=True, type="primary"):
-                if check_password(pw):
+                if check_demo_password(pw):
+                    # Demo account — skip TOTP
+                    st.session_state.authenticated = True
+                    st.session_state.is_demo = True
+                    st.session_state.auth_step = "password"
+                    st.rerun()
+                elif check_password(pw):
                     st.session_state.auth_step = "totp"
                     st.rerun()
                 else:
@@ -85,6 +97,7 @@ def auth_gate():
                 if st.button("Verify", use_container_width=True, type="primary"):
                     if check_totp(code):
                         st.session_state.authenticated = True
+                        st.session_state.is_demo = False
                         st.session_state.auth_step = "password"
                         st.rerun()
                     else:
@@ -103,8 +116,6 @@ TABS = {
 
 def top_nav():
     now = datetime.utcnow().strftime("%d/%m/%y  %H:%M UTC")
-
-    # Top bar HTML
     tab_keys = list(TABS.keys())
     current  = st.session_state.get("active_tab", tab_keys[0])
 
@@ -118,10 +129,8 @@ def top_nav():
         </div>
     """, unsafe_allow_html=True)
 
-    # Tab row using Streamlit buttons
-    cols = st.columns(len(tab_keys) + 2)  # +2 for search & logout
+    cols = st.columns(len(tab_keys) + 2)
     for i, tab_name in enumerate(tab_keys):
-        active = "tab-btn-active" if tab_name == current else "tab-btn"
         with cols[i]:
             if st.button(tab_name, key=f"tab_{i}",
                          use_container_width=True,
@@ -142,6 +151,7 @@ def top_nav():
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("Log out", use_container_width=True):
             st.session_state.authenticated = False
+            st.session_state.is_demo = False
             st.session_state.auth_step = "password"
             st.rerun()
 
