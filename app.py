@@ -129,6 +129,10 @@ def top_nav():
         </div>
     """, unsafe_allow_html=True)
 
+    # Hide Portfolio Tracker for demo users
+    if st.session_state.get("is_demo"):
+        tab_keys = [t for t in tab_keys if t != "Portfolio Tracker"]
+
     cols = st.columns(len(tab_keys) + 2)
     for i, tab_name in enumerate(tab_keys):
         with cols[i]:
