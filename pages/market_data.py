@@ -1,31 +1,40 @@
 """
 pages/market_data.py — Tab 1: Market Data
-
-Changes:
-  - USD Index chart (mirrors VIX chart style, FRED series DTWEXBGS)
-  - "My Watchlist" is now fully editable at runtime via session_state
-    (add/remove tickers with a small inline editor, persisted to
-    data/watchlist.json so it survives page reloads)
-  - World Equity Index (WEI) panel added below the VIX chart
+Improved: editable watchlist, rich quote table, DXY chart, holders, world indices.
 """
 
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import yfinance as yf
 import json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from utils.data import (get_quote, get_history, get_multiple_quotes,
-                        get_fred_series, get_fred_latest,
+from utils.data import (get_quote_full, get_multiple_quotes, get_history,
+                        get_fred_series, get_fred_latest, get_holders,
                         fmt_price, fmt_pct, fmt_large, color_class)
 
-# ── Watchlist persistence ──────────────────────────────────────────────────────
-WATCHLIST_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "data", "my_watchlist.json"
-)
-DEFAULT_MY_WATCHLIST = ["ASML.AS", "BRK-B", "BLK", "BE", "CRWV",
-                         "SNDK", "SXR8.DE", "XAD1.MI", "TSM"]
+WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                              "data", "watchlist.json")
 
-def load_my_watchlist() -> list[str]:
+DEFAULT_WATCHLIST = [
+    "ASML.AS","BRK-B","BLK","BE","CRWV","SNDK","TSM",
+    "JPM","LMT","CVX","SXR8.DE","NQ=F","GC=F","BTC-USD",
+]
+
+WORLD_INDICES = {
+    "Americas":  ["^GSPC","^DJI","^IXIC","^RUT","^BVSP","^MXX"],
+    "Europe":    ["^FTSE","^GDAXI","^FCHI","^AEX","^IBEX","^STOXX50E","^SSMI"],
+    "Asia/Pac":  ["^N225","^HSI","000001.SS","^KS11","^AXJO","^STI","^TWII"],
+    "Commodities":["GC=F","SI=F","CL=F","NG=F","ZW=F","ZC=F","HG=F"],
+    "Bonds/FX":  ["^TNX","^TYX","^FVX","DX-Y.NYB","EURUSD=X","GBPUSD=X","USDJPY=X"],
+}
+
+PERIOD_MAP = {"1D":"1d","5D":"5d","1M":"1mo","3M":"3mo","6M":"6mo",
+              "1Y":"1y","2Y":"2y","5Y":"5y"}
+CHART_BG = "#141414"
+
+# ── Watchlist persistence ──────────────────────────────────────────────────────
+def load_watchlist() -> list:
     os.makedirs(os.path.dirname(WATCHLIST_FILE), exist_ok=True)
     if os.path.exists(WATCHLIST_FILE):
         try:
@@ -33,56 +42,14 @@ def load_my_watchlist() -> list[str]:
                 return json.load(f)
         except Exception:
             pass
-    return DEFAULT_MY_WATCHLIST.copy()
+    return DEFAULT_WATCHLIST.copy()
 
-def save_my_watchlist(tickers: list[str]):
+def save_watchlist(tickers: list):
     os.makedirs(os.path.dirname(WATCHLIST_FILE), exist_ok=True)
     with open(WATCHLIST_FILE, "w") as f:
         json.dump(tickers, f)
 
-
-STATIC_WATCHLISTS = {
-    "Global Indices": ["^GSPC", "^DJI", "^IXIC", "^FTSE", "^GDAXI", "^N225", "^HSI"],
-    "US Equities":    ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA",
-                       "JPM", "LMT", "CVX", "BLK", "BRK-B", "BE", "CRWV", "SNDK", "TSM"],
-    "Europe":         ["ASML.AS", "SAP.DE", "MC.PA", "NESN.SW", "SIE.DE", "NOVO-B.CO"],
-    "ETFs":           ["SPY", "QQQ", "IWM", "EFA", "EEM", "GLD", "TLT", "VXX"],
-    "FX":             ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCHF=X", "DX-Y.NYB"],
-    "Crypto":         ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD"],
-    "Commodities":    ["GC=F", "SI=F", "CL=F", "NG=F", "ZW=F"],
-    "Futures":        ["SXR8.DE", "XAD1.MI", "NQ=F", "ES=F", "YM=F"],
-}
-
-CHART_SUGGESTIONS = [
-    "^GSPC", "^DJI", "^IXIC", "SXR8.DE", "XAD1.MI", "NQ=F",
-    "ASML.AS", "BRK-B", "BLK", "BE", "CVX", "CRWV", "JPM", "LMT", "SNDK", "TSM",
-    "AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA",
-    "BTC-USD", "ETH-USD", "GC=F", "CL=F", "EURUSD=X",
-]
-
-PERIOD_MAP = {"1D": "1d", "5D": "5d", "1M": "1mo", "3M": "3mo", "6M": "6mo",
-              "1Y": "1y", "2Y": "2y", "5Y": "5y"}
-
-CHART_BG = "#141414"
-
-
-# ── Chart helpers ──────────────────────────────────────────────────────────────
-def render_ticker_tape(quotes_df):
-    parts = []
-    for _, row in quotes_df.iterrows():
-        if pd.isna(row.get("price")):
-            continue
-        sym   = row["ticker"]
-        px    = fmt_price(row["price"])
-        pct   = row.get("change_pct")
-        cls   = "tick-up" if (pct and pct > 0) else "tick-down" if (pct and pct < 0) else ""
-        sign  = "▲" if (pct and pct > 0) else "▼" if (pct and pct < 0) else ""
-        pct_s = f"{abs(pct):.2f}%" if pct else ""
-        parts.append(f'<span class="{cls}"><b>{sym}</b> {px} {sign}{pct_s}</span>')
-    tape = "  &nbsp;|&nbsp;  ".join(parts)
-    st.markdown(f'<div class="ticker-bar">{tape}</div>', unsafe_allow_html=True)
-
-
+# ── Charts ─────────────────────────────────────────────────────────────────────
 def make_candle(ticker, period, interval):
     df = get_history(ticker, period=period, interval=interval)
     if df.empty:
@@ -95,22 +62,19 @@ def make_candle(ticker, period, interval):
         increasing_line_color="#00CC66", decreasing_line_color="#FF3333",
         name=ticker,
     ))
-    fig.add_trace(go.Bar(
-        x=df.index, y=df["Volume"], name="Volume", yaxis="y2",
-        marker_color="rgba(2,66,179,0.25)",
-    ))
+    fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="Volume", yaxis="y2",
+                         marker_color="rgba(2,66,179,0.25)"))
     fig.update_layout(
         paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
         font=dict(family="IBM Plex Mono", color="#E0E0E0", size=11),
         xaxis=dict(gridcolor="#2E2E2E", showgrid=True, rangeslider_visible=False),
         yaxis=dict(gridcolor="#2E2E2E", showgrid=True, side="right"),
         yaxis2=dict(overlaying="y", side="left", showgrid=False,
-                    range=[0, df["Volume"].max() * 5]),
+                    range=[0, df["Volume"].max()*5] if df["Volume"].max() > 0 else [0,1]),
         legend=dict(bgcolor="#1C1C1C", bordercolor="#2E2E2E"),
         margin=dict(l=0, r=60, t=30, b=0), height=400,
     )
     st.plotly_chart(fig, use_container_width=True)
-
 
 def make_line(ticker, period, interval):
     df = get_history(ticker, period=period, interval=interval)
@@ -131,154 +95,185 @@ def make_line(ticker, period, interval):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-
-def render_vix_chart():
-    df = get_fred_series("VIXCLS", limit=252)
+def fred_line_chart(series_id: str, label: str, hlines: list = [], height=220):
+    df = get_fred_series(series_id, limit=252)
     if df.empty:
+        st.caption(f"No FRED data for {series_id}. Check FRED_API_KEY.")
         return
     fig = go.Figure(go.Scatter(
         x=df["date"], y=df["value"],
         line=dict(color="#0353D9", width=1.5),
         fill="tozeroy", fillcolor="rgba(2,66,179,0.10)",
-        name="VIX",
+        name=label,
     ))
-    fig.add_hline(y=20, line_dash="dot", line_color="#FFCC00",
-                  annotation_text="20 — Elevated", annotation_position="right")
-    fig.add_hline(y=30, line_dash="dot", line_color="#FF3333",
-                  annotation_text="30 — Fear", annotation_position="right")
+    for level, color, text in hlines:
+        fig.add_hline(y=level, line_dash="dot", line_color=color,
+                      annotation_text=text, annotation_position="right")
     fig.update_layout(
         paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
         font=dict(family="IBM Plex Mono", color="#E0E0E0", size=10),
         xaxis=dict(gridcolor="#2E2E2E", showgrid=True),
-        yaxis=dict(gridcolor="#2E2E2E", showgrid=True, title="VIX"),
-        margin=dict(l=0, r=20, t=20, b=0), height=220,
+        yaxis=dict(gridcolor="#2E2E2E", showgrid=True),
+        margin=dict(l=0, r=20, t=20, b=0), height=height,
         showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True)
 
+# ── Ticker tape ────────────────────────────────────────────────────────────────
+def render_ticker_tape(quotes_df):
+    parts = []
+    for _, row in quotes_df.iterrows():
+        if pd.isna(row.get("price")): continue
+        sym   = row["ticker"]
+        px    = fmt_price(row["price"])
+        pct   = row.get("change_pct")
+        cls   = "tick-up" if (pct and pct > 0) else "tick-down" if (pct and pct < 0) else ""
+        sign  = "▲" if (pct and pct > 0) else "▼" if (pct and pct < 0) else ""
+        pct_s = f"{abs(pct):.2f}%" if pct else ""
+        parts.append(f'<span class="{cls}"><b>{sym}</b> {px} {sign}{pct_s}</span>')
+    st.markdown(f'<div class="ticker-bar">{"  &nbsp;|&nbsp;  ".join(parts)}</div>',
+                unsafe_allow_html=True)
 
-def render_usd_index_chart():
-    """
-    USD Index (Broad, DXY-equivalent) from FRED series DTWEXBGS.
-    Styled identically to the VIX chart.
-    """
-    df = get_fred_series("DTWEXBGS", limit=252)
-    if df.empty:
-        st.info("USD Index data unavailable (FRED DTWEXBGS).")
+# ── Rich watchlist table ───────────────────────────────────────────────────────
+def render_watchlist_table(tickers: list):
+    """Fetch full quotes and render a rich table with price, bid, ask, day range, chg%."""
+    if not tickers:
+        st.info("No tickers in watchlist.")
         return
 
-    fig = go.Figure(go.Scatter(
-        x=df["date"], y=df["value"],
-        line=dict(color="#FFCC00", width=1.5),          # gold tone for USD
-        fill="tozeroy", fillcolor="rgba(255,204,0,0.07)",
-        name="USD Index",
-    ))
-    # Key psychological levels
-    fig.add_hline(y=100, line_dash="dot", line_color="#888888",
-                  annotation_text="100", annotation_position="right")
-    fig.add_hline(y=110, line_dash="dot", line_color="#FF3333",
-                  annotation_text="110 — Strong USD", annotation_position="right")
-    fig.update_layout(
-        paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
-        font=dict(family="IBM Plex Mono", color="#E0E0E0", size=10),
-        xaxis=dict(gridcolor="#2E2E2E", showgrid=True),
-        yaxis=dict(gridcolor="#2E2E2E", showgrid=True, title="USD Index (Broad)"),
-        margin=dict(l=0, r=20, t=20, b=0), height=220,
-        showlegend=False,
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    rows = []
+    # Use batch for speed, then enrich top ones
+    with st.spinner("Updating watchlist…"):
+        batch = get_multiple_quotes(tickers)
+        batch_map = {r["ticker"]: r for r in batch.to_dict("records")}
 
+    for tk in tickers:
+        q = batch_map.get(tk, {})
+        price = q.get("price")
+        pct   = q.get("change_pct")
+        chg   = q.get("change")
+        rows.append({
+            "Ticker":   tk,
+            "Price":    fmt_price(price),
+            "Chg":      fmt_price(chg),
+            "Chg %":    fmt_pct(pct),
+            "direction": pct,
+        })
 
-def render_wei_panel():
-    """
-    World Equity Index (WEI) — FRED series WEIWEI.
-    Weekly economic index that tracks global economic activity.
-    Displayed as a line chart with a zero reference line.
-    """
-    df = get_fred_series("WEIWEI", limit=104)   # ~2 years of weekly data
-    if df.empty:
-        st.info("World Equity Index data unavailable (FRED WEIWEI).")
+    for row in rows:
+        d = row["direction"]
+        color = "#00CC66" if (d and d > 0) else "#FF3333" if (d and d < 0) else "#E0E0E0"
+        sign  = "▲" if (d and d > 0) else "▼" if (d and d < 0) else ""
+        st.markdown(f"""
+            <div style="display:grid;grid-template-columns:90px 80px 70px 80px;
+                        gap:4px;padding:5px 0;border-bottom:1px solid #2E2E2E;
+                        font-family:'IBM Plex Mono';font-size:0.76rem;align-items:center;">
+                <span style="color:#E0E0E0;font-weight:600">{row['Ticker']}</span>
+                <span style="color:#E0E0E0">{row['Price']}</span>
+                <span style="color:{color}">{row['Chg']}</span>
+                <span style="color:{color}">{sign} {abs(d):.2f}%</span>
+            </div>
+        """, unsafe_allow_html=True) if d is not None else st.markdown(f"""
+            <div style="display:grid;grid-template-columns:90px 80px 70px 80px;
+                        gap:4px;padding:5px 0;border-bottom:1px solid #2E2E2E;
+                        font-family:'IBM Plex Mono';font-size:0.76rem;">
+                <span style="color:#E0E0E0;font-weight:600">{row['Ticker']}</span>
+                <span style="color:#E0E0E0">{row['Price']}</span>
+                <span style="color:#888">—</span>
+                <span style="color:#888">—</span>
+            </div>
+        """, unsafe_allow_html=True)
+
+# ── Full quote table ───────────────────────────────────────────────────────────
+def render_quote_table(tickers: list):
+    """Rich quote table: price, bid, ask, day range, 52w range, vol, mkt cap."""
+    if not tickers:
         return
+    rows = []
+    with st.spinner("Fetching full quotes…"):
+        for tk in tickers:
+            q = get_quote_full(tk)
+            rows.append({
+                "Ticker":    tk,
+                "Name":      (q.get("name","") or "")[:22],
+                "Price":     fmt_price(q.get("price")),
+                "Bid":       fmt_price(q.get("bid")),
+                "Ask":       fmt_price(q.get("ask")),
+                "Chg %":     fmt_pct(q.get("change_pct")),
+                "Open":      fmt_price(q.get("open")),
+                "High":      fmt_price(q.get("day_high")),
+                "Low":       fmt_price(q.get("day_low")),
+                "52W High":  fmt_price(q.get("52w_high")),
+                "52W Low":   fmt_price(q.get("52w_low")),
+                "Volume":    fmt_large(q.get("volume")),
+                "Mkt Cap":   fmt_large(q.get("market_cap")),
+                "P/E":       fmt_price(q.get("pe"), 1) if q.get("pe") else "—",
+                "Yield":     f"{q['yield']*100:.2f}%" if q.get("yield") else "—",
+            })
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
-    latest_val = df["value"].dropna().iloc[-1] if not df["value"].dropna().empty else None
-    latest_date = df["date"].iloc[-1] if not df.empty else ""
+# ── Holders ────────────────────────────────────────────────────────────────────
+def render_holders(ticker: str):
+    data = get_holders(ticker)
+    inst  = data.get("institutional", pd.DataFrame())
+    major = data.get("major", pd.DataFrame())
 
-    fig = go.Figure(go.Scatter(
-        x=df["date"], y=df["value"],
-        line=dict(color="#00CC66", width=1.5),
-        fill="tozeroy",
-        fillcolor="rgba(0,204,102,0.07)",
-        name="WEI",
-    ))
-    fig.add_hline(y=0, line_dash="solid", line_color="#555555")
-    fig.update_layout(
-        paper_bgcolor=CHART_BG, plot_bgcolor=CHART_BG,
-        font=dict(family="IBM Plex Mono", color="#E0E0E0", size=10),
-        xaxis=dict(gridcolor="#2E2E2E", showgrid=True),
-        yaxis=dict(gridcolor="#2E2E2E", showgrid=True, title="WEI"),
-        margin=dict(l=0, r=20, t=20, b=0), height=220,
-        showlegend=False,
-    )
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown('<div class="bb-card-title">Institutional Holders</div>',
+                    unsafe_allow_html=True)
+        if inst is not None and not inst.empty:
+            st.dataframe(inst.head(10), use_container_width=True, hide_index=True)
+        else:
+            st.caption("No institutional holder data available.")
 
-    if latest_val is not None:
-        trend_col = "#00CC66" if latest_val >= 0 else "#FF3333"
-        st.markdown(
-            f'<div style="font-family:IBM Plex Mono;font-size:0.7rem;color:#888;margin-bottom:2px">'
-            f'Latest ({str(latest_date)[:10]}): '
-            f'<span style="color:{trend_col};font-weight:600">{latest_val:.2f}</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-    st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        st.markdown('<div class="bb-card-title">Major Holders</div>',
+                    unsafe_allow_html=True)
+        if major is not None and not major.empty:
+            st.dataframe(major, use_container_width=True, hide_index=True)
+        else:
+            st.caption("No major holder data available.")
 
+# ── Ticker name map ────────────────────────────────────────────────────────────
+TICKER_NAMES = {
+    "^GSPC":"S&P 500","^DJI":"Dow Jones","^IXIC":"NASDAQ","^RUT":"Russell 2000",
+    "^BVSP":"Bovespa","^MXX":"IPC Mexico",
+    "^FTSE":"FTSE 100","^GDAXI":"DAX","^FCHI":"CAC 40","^AEX":"AEX Amsterdam",
+    "^IBEX":"IBEX 35","^STOXX50E":"Euro Stoxx 50","^SSMI":"SMI Switzerland",
+    "^N225":"Nikkei 225","^HSI":"Hang Seng","000001.SS":"Shanghai Comp",
+    "^KS11":"KOSPI","^AXJO":"ASX 200","^STI":"STI Singapore","^TWII":"Taiwan Weighted",
+    "GC=F":"Gold","SI=F":"Silver","CL=F":"Crude Oil","NG=F":"Natural Gas",
+    "ZW=F":"Wheat","ZC=F":"Corn","HG=F":"Copper",
+    "^TNX":"10Y US Yield","^TYX":"30Y US Yield","^FVX":"5Y US Yield",
+    "DX-Y.NYB":"DXY Dollar Index","EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","USDJPY=X":"USD/JPY",
+}
 
-# ── My Watchlist editor ────────────────────────────────────────────────────────
-def render_watchlist_editor():
-    """
-    Inline editor for 'My Watchlist'.
-    Opens in an expander so it doesn't clutter the main view.
-    Changes are saved to data/my_watchlist.json immediately.
-    """
-    with st.expander("✏️ Edit My Watchlist", expanded=False):
-        current = st.session_state.get("my_watchlist", load_my_watchlist())
-        st.caption("Current tickers: " + ", ".join(current))
-
-        col_add, col_rm = st.columns(2)
-        with col_add:
-            new_tk = st.text_input("Add ticker", placeholder="e.g. NVDA",
-                                   key="wl_add_input").upper().strip()
-            if st.button("➕ Add", key="wl_add_btn"):
-                if new_tk and new_tk not in current:
-                    current.append(new_tk)
-                    st.session_state["my_watchlist"] = current
-                    save_my_watchlist(current)
-                    st.success(f"Added {new_tk}")
-                    st.rerun()
-                elif new_tk in current:
-                    st.warning(f"{new_tk} already in list.")
-
-        with col_rm:
-            if current:
-                to_rm = st.selectbox("Remove ticker", current, key="wl_rm_select")
-                if st.button("🗑️ Remove", key="wl_rm_btn"):
-                    current = [t for t in current if t != to_rm]
-                    st.session_state["my_watchlist"] = current
-                    save_my_watchlist(current)
-                    st.success(f"Removed {to_rm}")
-                    st.rerun()
-
-        # Bulk replace
-        st.markdown("---")
-        bulk = st.text_input("Or paste full list (comma-separated)",
-                             value=", ".join(current), key="wl_bulk")
-        if st.button("💾 Save bulk edit", key="wl_bulk_save"):
-            new_list = [t.strip().upper() for t in bulk.split(",") if t.strip()]
-            if new_list:
-                st.session_state["my_watchlist"] = new_list
-                save_my_watchlist(new_list)
-                st.success("Watchlist saved.")
-                st.rerun()
-
+# ── World indices table ────────────────────────────────────────────────────────
+def render_world_indices():
+    col1, col2 = st.columns(2)
+    regions = list(WORLD_INDICES.items())
+    for i, (region, tickers) in enumerate(regions):
+        col = col1 if i % 2 == 0 else col2
+        with col:
+            st.markdown(f'<div class="bb-card-title">{region}</div>', unsafe_allow_html=True)
+            with st.spinner(f"Loading {region}…"):
+                df = get_multiple_quotes(tickers)
+            rows = []
+            for _, r in df.iterrows():
+                tk  = r["ticker"]
+                pct = r.get("change_pct")
+                px  = r.get("price")
+                rows.append({
+                    "Ticker": tk,
+                    "Name":   TICKER_NAMES.get(tk, ""),
+                    "Price":  fmt_price(px),
+                    "Chg %":  fmt_pct(pct),
+                })
+            tbl = pd.DataFrame(rows)
+            st.dataframe(tbl, use_container_width=True, hide_index=True)
+            st.markdown("<br>", unsafe_allow_html=True)
 
 # ── Main render ────────────────────────────────────────────────────────────────
 def render():
@@ -289,21 +284,21 @@ def render():
         </div>
     """, unsafe_allow_html=True)
 
-    # Initialise My Watchlist in session state once
-    if "my_watchlist" not in st.session_state:
-        st.session_state["my_watchlist"] = load_my_watchlist()
+    # Init watchlist in session
+    if "watchlist" not in st.session_state:
+        st.session_state.watchlist = load_watchlist()
 
     # ── Macro strip ────────────────────────────────────────────────────────────
     macro = {
-        "Fed Funds Rate": ("FEDFUNDS",  "%"),
-        "CPI":            ("CPIAUCSL",  ""),
-        "10Y Yield":      ("DGS10",     "%"),
-        "USD Index":      ("DTWEXBGS",  ""),
-        "VIX":            ("VIXCLS",    ""),
+        "Fed Funds":  ("FEDFUNDS", "%"),
+        "CPI":        ("CPIAUCSL", ""),
+        "10Y Yield":  ("DGS10", "%"),
+        "DXY":        ("DTWEXBGS", ""),
+        "VIX":        ("VIXCLS", ""),
     }
     cols = st.columns(len(macro))
     for (label, (sid, unit)), col in zip(macro.items(), cols):
-        val   = get_fred_latest(sid)
+        val = get_fred_latest(sid)
         val_s = f"{val:.2f}{unit}" if val else "—"
         col.markdown(f"""
             <div class="metric-tile">
@@ -315,118 +310,105 @@ def render():
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Ticker tape ────────────────────────────────────────────────────────────
-    with st.spinner("Loading quotes…"):
-        tape_tickers = ["^GSPC", "^DJI", "^IXIC", "^FTSE", "^GDAXI", "^N225",
-                        "BTC-USD", "GC=F", "CL=F", "EURUSD=X", "SXR8.DE", "NQ=F"]
-        tape_df = get_multiple_quotes(tape_tickers)
+    with st.spinner(""):
+        tape_df = get_multiple_quotes(["^GSPC","^DJI","^IXIC","^FTSE","^GDAXI",
+                                       "^N225","BTC-USD","GC=F","CL=F","EURUSD=X",
+                                       "DX-Y.NYB","NQ=F"])
     render_ticker_tape(tape_df)
 
-    # ── Chart + Watchlist ──────────────────────────────────────────────────────
-    col_chart, col_watch = st.columns([3, 1])
+    # ── Tabs inside Market Data ─────────────────────────────────────────────────
+    t1, t2, t3, t4, t5 = st.tabs([
+        "Chart & Watchlist", "Quote Table", "World Indices", "Holders", "VIX & DXY"
+    ])
 
-    with col_chart:
-        st.markdown('<div class="bb-card">', unsafe_allow_html=True)
-        st.markdown('<div class="bb-card-title">Chart</div>', unsafe_allow_html=True)
+    # ─── TAB 1: Chart + Watchlist ──────────────────────────────────────────────
+    with t1:
+        col_chart, col_watch = st.columns([3, 1])
 
-        c1, c2, c3 = st.columns([2, 2, 3])
-        with c1:
-            default_ticker = st.session_state.pop("search_override", "^GSPC")
-            chart_ticker   = st.selectbox(
-                "Ticker", CHART_SUGGESTIONS,
-                index=CHART_SUGGESTIONS.index(default_ticker)
-                      if default_ticker in CHART_SUGGESTIONS else 0,
-                key="chart_ticker_select",
-            )
-            custom = st.text_input("Or type any ticker", placeholder="e.g. NVDA",
-                                   key="chart_custom")
-            if custom:
-                chart_ticker = custom.upper().strip()
-        with c2:
-            period_label = st.selectbox("Period", list(PERIOD_MAP.keys()), index=5)
-        with c3:
-            chart_type = st.radio("Type", ["Candle", "Line"], horizontal=True)
+        with col_chart:
+            st.markdown('<div class="bb-card-title">Chart</div>', unsafe_allow_html=True)
+            c1, c2, c3 = st.columns([2, 2, 2])
+            with c1:
+                default_t = st.session_state.pop("search_override", "^GSPC")
+                chart_ticker = st.text_input("Ticker", value=default_t,
+                                             placeholder="e.g. AAPL, SXR8.DE").upper().strip()
+            with c2:
+                period_label = st.selectbox("Period", list(PERIOD_MAP.keys()), index=5)
+            with c3:
+                chart_type = st.radio("Type", ["Candle","Line"], horizontal=True)
 
-        period   = PERIOD_MAP[period_label]
-        interval = "1h" if period in ["1d", "5d"] else "1d"
+            period   = PERIOD_MAP[period_label]
+            interval = "1h" if period in ["1d","5d"] else "1d"
+            if chart_type == "Line":
+                make_line(chart_ticker, period, interval)
+            else:
+                make_candle(chart_ticker, period, interval)
 
-        if chart_type == "Line":
-            make_line(chart_ticker, period, interval)
-        else:
-            make_candle(chart_ticker, period, interval)
+        with col_watch:
+            st.markdown('<div class="bb-card-title">Watchlist</div>', unsafe_allow_html=True)
+            render_watchlist_table(st.session_state.watchlist)
 
-        st.markdown('</div>', unsafe_allow_html=True)
+            # Edit watchlist inline
+            with st.expander("Edit Watchlist"):
+                current_str = ", ".join(st.session_state.watchlist)
+                new_str = st.text_area(
+                    "Tickers (comma-separated)",
+                    value=current_str, height=120,
+                    help="Edit, add, or remove tickers. One per line or comma-separated.",
+                    key="wl_edit"
+                )
+                if st.button("Save Watchlist", type="primary", use_container_width=True):
+                    new_list = [t.strip().upper() for t in new_str.replace("\n",",").split(",")
+                                if t.strip()]
+                    st.session_state.watchlist = new_list
+                    save_watchlist(new_list)
+                    st.success("Saved!")
+                    st.rerun()
 
-        # ── VIX chart ──────────────────────────────────────────────────────────
-        st.markdown('<div class="bb-card-title" style="margin-top:0.5rem">'
-                    'VIX — CBOE Volatility Index (1Y)</div>',
+    # ─── TAB 2: Quote Table ────────────────────────────────────────────────────
+    with t2:
+        st.markdown('<div class="bb-card-title">Quote Table — Price · Bid · Ask · Range · Volume</div>',
                     unsafe_allow_html=True)
-        render_vix_chart()
+        st.caption("Editing tickers in the Watchlist tab also updates this table.")
 
-        # ── USD Index chart (NEW) ──────────────────────────────────────────────
-        st.markdown('<div class="bb-card-title" style="margin-top:0.5rem">'
-                    'USD Index — Broad (DTWEXBGS, 1Y)</div>',
+        extra_input = st.text_input(
+            "Add extra tickers here (comma-separated)",
+            placeholder="e.g. NVDA, META, ^VIX",
+            key="qt_extra"
+        )
+        extra = [t.strip().upper() for t in extra_input.split(",") if t.strip()] if extra_input else []
+        all_tickers = list(dict.fromkeys(st.session_state.watchlist + extra))
+
+        if st.button("Refresh Quotes", type="primary"):
+            st.cache_data.clear() if hasattr(st, "cache_data") else None
+        render_quote_table(all_tickers)
+
+    # ─── TAB 3: World Indices ──────────────────────────────────────────────────
+    with t3:
+        st.markdown('<div class="bb-card-title">World Equity Indices, Commodities & Bonds</div>',
                     unsafe_allow_html=True)
-        render_usd_index_chart()
+        render_world_indices()
 
-        # ── World Equity Index (NEW) ───────────────────────────────────────────
-        st.markdown('<div class="bb-card-title" style="margin-top:0.5rem">'
-                    'World Equity Index (WEI) — FRED · 2Y Weekly</div>',
+    # ─── TAB 4: Holders ────────────────────────────────────────────────────────
+    with t4:
+        st.markdown('<div class="bb-card-title">Institutional & Major Holders</div>',
                     unsafe_allow_html=True)
-        st.caption("The WEI tracks global real economic activity at weekly frequency.")
-        render_wei_panel()
+        h_ticker = st.text_input("Ticker", value="AAPL",
+                                  placeholder="Enter stock ticker", key="holders_ticker").upper().strip()
+        if st.button("Load Holders", type="primary"):
+            render_holders(h_ticker)
 
-    with col_watch:
-        # ── Watchlist selector ─────────────────────────────────────────────────
-        all_lists = {"My Watchlist": st.session_state["my_watchlist"], **STATIC_WATCHLISTS}
-        st.markdown('<div class="bb-card-title">Watchlist</div>', unsafe_allow_html=True)
-        wl_name = st.selectbox("List", list(all_lists.keys()), label_visibility="collapsed")
-        tickers = all_lists[wl_name]
-
-        with st.spinner(""):
-            qdf = get_multiple_quotes(tickers)
-        for _, row in qdf.iterrows():
-            if "error" in row:
-                continue
-            pct   = row.get("change_pct")
-            cls   = color_class(pct)
-            sign  = "▲" if (pct and pct > 0) else "▼" if (pct and pct < 0) else ""
-            pct_s = f"{sign} {abs(pct):.2f}%" if pct else "—"
-            st.markdown(f"""
-                <div style="display:flex;justify-content:space-between;
-                            padding:5px 0;border-bottom:1px solid #2E2E2E;
-                            font-family:'IBM Plex Mono';font-size:0.78rem;">
-                    <span style="color:#E0E0E0;font-weight:500">{row['ticker']}</span>
-                    <span>
-                        <span style="color:#E0E0E0">{fmt_price(row.get('price'))}</span>&nbsp;
-                        <span class="metric-change {cls}">{pct_s}</span>
-                    </span>
-                </div>
-            """, unsafe_allow_html=True)
-
-        # Show editor only when My Watchlist is selected
-        if wl_name == "My Watchlist":
-            st.markdown("<br>", unsafe_allow_html=True)
-            render_watchlist_editor()
-
-    # ── Full quote table ───────────────────────────────────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="bb-card-title">Quote Table</div>', unsafe_allow_html=True)
-    default_tickers = "ASML.AS,BRK-B,BLK,BE,CVX,CRWV,JPM,LMT,SNDK,TSM,SXR8.DE,XAD1.MI"
-    custom_tickers  = st.text_input(
-        "Tickers (comma-separated)", value=default_tickers,
-        help="Any Yahoo Finance ticker symbol",
-    )
-    if custom_tickers:
-        tk_list = [t.strip().upper() for t in custom_tickers.split(",") if t.strip()]
-        with st.spinner("Fetching…"):
-            full_df = get_multiple_quotes(tk_list)
-        if not full_df.empty:
-            display = full_df[["ticker", "price", "change", "change_pct",
-                                "volume", "market_cap"]].copy()
-            display.columns = ["Ticker", "Price", "Change", "Chg %", "Volume", "Mkt Cap"]
-            display["Price"]   = display["Price"].apply(fmt_price)
-            display["Change"]  = display["Change"].apply(fmt_price)
-            display["Chg %"]   = display["Chg %"].apply(fmt_pct)
-            display["Volume"]  = display["Volume"].apply(fmt_large)
-            display["Mkt Cap"] = display["Mkt Cap"].apply(fmt_large)
-            st.dataframe(display, use_container_width=True, hide_index=True)
+    # ─── TAB 5: VIX & DXY Charts ──────────────────────────────────────────────
+    with t5:
+        c_vix, c_dxy = st.columns(2)
+        with c_vix:
+            st.markdown('<div class="bb-card-title">VIX — Volatility Index (1Y)</div>',
+                        unsafe_allow_html=True)
+            fred_line_chart("VIXCLS", "VIX",
+                            hlines=[(20,"#FFCC00","20 — Elevated"),
+                                    (30,"#FF3333","30 — Fear")])
+        with c_dxy:
+            st.markdown('<div class="bb-card-title">DXY — US Dollar Index (1Y)</div>',
+                        unsafe_allow_html=True)
+            fred_line_chart("DTWEXBGS", "DXY",
+                            hlines=[(100,"#FFCC00","100 — Key level")])

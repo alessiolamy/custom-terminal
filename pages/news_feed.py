@@ -1,66 +1,111 @@
 """
 pages/news_feed.py — Tab 2: News Feed
-
-Changes:
-  - Economic calendar date/time text: was color:#888 (invisible on dark bg).
-    Fixed to color:#C8D0D8 (light grey, clearly visible).
-  - Added "Walter Bloomberg (X)" section that scrapes/links @DeItaone posts
-    via Nitter public RSS (no Twitter API key needed).
-  - News tab now has three sub-sections: RSS headlines | Walter Bloomberg | Economic Calendar
+Fixed calendar date/time parsing, Walter Bloomberg via embed, no earnings calendar.
 """
 
 import streamlit as st
-import pandas as pd
+import re
 from datetime import datetime
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from utils.data import get_news, get_rss_feed, get_forex_factory_calendar
+from utils.data import get_rss_feed, get_news, get_forex_factory_calendar
 
 RSS_FEEDS = {
-    "Financial Times":     "https://www.ft.com/rss/home",
-    "The Economist":       "https://www.economist.com/finance-and-economics/rss.xml",
-    "Wall Street Journal": "https://feeds.a.omnimarc.com/rss/rss.wsj.com/wsj/pub/rss/market",
-    "Reuters Business":    "https://feeds.reuters.com/reuters/businessNews",
-    "Bloomberg Markets":   "https://feeds.bloomberg.com/markets/news.rss",
-    "CNBC":                "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-    "Seeking Alpha":       "https://seekingalpha.com/market_currents.xml",
-    "Yahoo Finance":       "https://finance.yahoo.com/rss/topfinstories",
+    "Financial Times":       "https://www.ft.com/rss/home",
+    "The Economist":         "https://www.economist.com/finance-and-economics/rss.xml",
+    "Wall Street Journal":   "https://feeds.a.omnimarc.com/rss/rss.wsj.com/wsj/pub/rss/market",
+    "Reuters Business":      "https://feeds.reuters.com/reuters/businessNews",
+    "Bloomberg Markets":     "https://feeds.bloomberg.com/markets/news.rss",
+    "CNBC":                  "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    "Yahoo Finance":         "https://finance.yahoo.com/rss/topfinstories",
 }
-
-# Walter Bloomberg / @DeItaone — public Nitter RSS mirrors (fallback chain)
-# Nitter instances go up/down; we try several in order.
-WALTER_BLOOMBERG_NITTER_FEEDS = [
-    "https://nitter.poast.org/DeItaone/rss",
-    "https://nitter.privacydev.net/DeItaone/rss",
-    "https://nitter.net/DeItaone/rss",
-    "https://nitter.1d4.us/DeItaone/rss",
-]
-WALTER_BLOOMBERG_X_URL = "https://x.com/DeItaone"
 
 IMPACT_COLORS = {
     "High":         "#FF3333",
     "Medium":       "#FFCC00",
-    "Low":          "#00CC66",
-    "Non-Economic": "#555555",
+    "Low":          "#555555",
+    "Non-Economic": "#333333",
 }
 
 CURRENCIES_FILTER = {"USD", "EUR", "CHF", "GBP", "JPY"}
 
-
-# ── Article renderer ───────────────────────────────────────────────────────────
-def render_article(article: dict, source_label: str):
-    title   = article.get("title") or article.get("headline", "No title")
-    link    = article.get("link") or article.get("url", "#")
-    pub     = article.get("published") or article.get("publishedAt", "")
-    summary = article.get("summary") or article.get("description", "")
-    if summary and len(summary) > 180:
-        summary = summary[:177] + "…"
+def fmt_pub_date(raw: str) -> str:
+    """Parse various date formats → DD/MM/YY  HH:MM"""
+    if not raw:
+        return ""
+    fmts = [
+        "%a, %d %b %Y %H:%M:%S %z",
+        "%a, %d %b %Y %H:%M:%S %Z",
+        "%a, %d %b %Y %H:%M:%S GMT",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ]
+    for fmt in fmts:
+        try:
+            dt = datetime.strptime(raw.strip(), fmt)
+            return dt.strftime("%d/%m/%y  %H:%M")
+        except Exception:
+            pass
     try:
-        if "T" in str(pub):
-            dt  = datetime.fromisoformat(str(pub).replace("Z", ""))
-            pub = dt.strftime("%d/%m/%y  %H:%M")
+        dt = datetime.fromisoformat(raw.replace("Z", ""))
+        return dt.strftime("%d/%m/%y  %H:%M")
+    except Exception:
+        return raw[:16]
+
+def parse_ff_datetime(raw: str):
+    """
+    Parse ForexFactory date strings.
+    Formats seen: '06-11-2025 8:30am', '06-11-2025', 'Wednesday Jun 11'
+    Returns (date_str, time_str) both as display strings DD/MM/YY and HH:MM
+    """
+    if not raw:
+        return "", ""
+    raw = raw.strip()
+    date_disp = ""
+    time_disp = ""
+    try:
+        # Format: MM-DD-YYYY HH:MMam/pm  e.g. "06-11-2025 8:30am"
+        m = re.match(r"(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}:\d{2}(?:am|pm)?)", raw, re.I)
+        if m:
+            mon, day, yr, t = m.group(1), m.group(2), m.group(3), m.group(4)
+            date_disp = f"{day.zfill(2)}/{mon.zfill(2)}/{yr[2:]}"
+            # Convert 12h to 24h
+            try:
+                dt = datetime.strptime(t.lower(), "%I:%M%p")
+                time_disp = dt.strftime("%H:%M")
+            except Exception:
+                time_disp = t
+            return date_disp, time_disp
+
+        # Format: MM-DD-YYYY only
+        m2 = re.match(r"(\d{1,2})-(\d{1,2})-(\d{4})", raw)
+        if m2:
+            mon, day, yr = m2.group(1), m2.group(2), m2.group(3)
+            return f"{day.zfill(2)}/{mon.zfill(2)}/{yr[2:]}", ""
+
+        # Format: YYYY-MM-DDTHH:MM:SS
+        m3 = re.match(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})", raw)
+        if m3:
+            yr, mon, day, t = m3.group(1), m3.group(2), m3.group(3), m3.group(4)
+            return f"{day}/{mon}/{yr[2:]}", t
+
     except Exception:
         pass
+
+    return raw[:10], ""
+
+def render_article(article: dict, source_label: str):
+    title   = (article.get("title") or "").strip() or "No title"
+    link    = article.get("link") or article.get("url", "#")
+    pub_raw = article.get("published") or article.get("publishedAt", "")
+    summary = article.get("summary") or article.get("description", "")
+    pub     = fmt_pub_date(str(pub_raw))
+    if summary and len(summary) > 200:
+        summary = summary[:197] + "…"
+    summary = re.sub(r"<[^>]+>", "", summary)
+
     st.markdown(f"""
         <div class="news-item">
             <div class="news-headline">
@@ -68,248 +113,171 @@ def render_article(article: dict, source_label: str):
                    style="color:#E0E0E0;text-decoration:none;">{title}</a>
             </div>
             <div class="news-meta">
-                <span class="news-source">{source_label}</span>
+                <span style="color:#0353D9;font-weight:600">{source_label}</span>
                 &nbsp;·&nbsp; {pub}
             </div>
-            {"<div style='font-size:0.78rem;color:#777;margin-top:3px'>" + summary + "</div>" if summary else ""}
+            {"<div style='font-size:0.76rem;color:#777;margin-top:3px'>" + summary + "</div>" if summary else ""}
         </div>
     """, unsafe_allow_html=True)
 
-
-# ── Walter Bloomberg section ───────────────────────────────────────────────────
-def render_walter_bloomberg():
-    """
-    Fetches @DeItaone posts via Nitter public RSS mirrors.
-    Nitter is an open-source Twitter front-end that exposes RSS without an API key.
-    Falls back gracefully if all mirrors are down.
-    """
-    st.markdown(f"""
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-            <div style="font-family:'IBM Plex Mono';font-size:0.8rem;font-weight:600;color:#0353D9">
-                Walter Bloomberg
-            </div>
-            <div style="font-size:0.7rem;color:#666">@DeItaone</div>
-            <a href="{WALTER_BLOOMBERG_X_URL}" target="_blank"
-               style="font-size:0.68rem;color:#0353D9;text-decoration:none;margin-left:auto">
-               Open on X ↗
-            </a>
-        </div>
-        <div style="font-size:0.7rem;color:#555;margin-bottom:10px;font-family:'IBM Plex Mono'">
-            Real-time Bloomberg terminal headlines re-posted on X
-        </div>
-    """, unsafe_allow_html=True)
-
-    posts = []
-    for feed_url in WALTER_BLOOMBERG_NITTER_FEEDS:
-        try:
-            items = get_rss_feed(feed_url)
-            if items:
-                posts = items
-                break
-        except Exception:
-            continue
-
-    if not posts:
-        st.markdown(f"""
-            <div style="background:#1C1C1C;border:1px solid #2E2E2E;border-radius:6px;
-                        padding:12px 16px;font-family:'IBM Plex Mono';font-size:0.78rem;">
-                <div style="color:#FFCC00;margin-bottom:6px">⚠ Nitter mirrors currently unavailable</div>
-                <div style="color:#888;line-height:1.6">
-                    Walter Bloomberg posts Bloomberg terminal headlines in real-time on X.<br>
-                    Follow directly at
-                    <a href="{WALTER_BLOOMBERG_X_URL}" target="_blank"
-                       style="color:#0353D9">x.com/DeItaone</a>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-        return
-
-    for post in posts[:30]:
-        title   = post.get("title", "")
-        link    = post.get("link", "#")
-        pub     = post.get("published", "")
-        try:
-            if pub:
-                dt  = datetime.fromisoformat(str(pub).replace("Z", ""))
-                pub = dt.strftime("%d/%m/%y  %H:%M")
-        except Exception:
-            pass
-
-        # Clean up Nitter title artifacts (sometimes wraps in RT: or @)
-        display_title = title.replace("R to @DeItaone:", "").strip()
-
-        st.markdown(f"""
-            <div style="padding:7px 0;border-bottom:1px solid #2E2E2E;
-                        font-family:'IBM Plex Mono'">
-                <div style="font-size:0.8rem;color:#E0E0E0;line-height:1.5">
-                    <a href="{link}" target="_blank"
-                       style="color:#E0E0E0;text-decoration:none">{display_title}</a>
-                </div>
-                <div style="font-size:0.65rem;color:#555;margin-top:2px">{pub}</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-
-# ── Economic calendar ──────────────────────────────────────────────────────────
 def render_calendar(events: list):
-    if not events:
-        st.info("Economic calendar data unavailable.")
-        return
+    filtered = [e for e in events
+                if str(e.get("country", "")).upper() in CURRENCIES_FILTER]
 
-    filtered = [e for e in events if e.get("country", "").upper() in CURRENCIES_FILTER]
     if not filtered:
-        st.info("No events found for USD, EUR, CHF, GBP, JPY this week.")
+        st.info("No events this week for USD / EUR / CHF / GBP / JPY.")
         return
 
-    # Header
+    # Column header
     st.markdown("""
         <div style="display:grid;
-                    grid-template-columns:90px 60px 1fr 55px 70px 80px 110px;
-                    gap:6px;padding:5px 0;font-family:'IBM Plex Mono';
+                    grid-template-columns:80px 60px 50px 1fr 70px 70px 130px;
+                    gap:8px;padding:6px 4px;font-family:'IBM Plex Mono';
                     font-size:0.65rem;color:#0353D9;
-                    border-bottom:1px solid #0242B3;margin-bottom:4px;">
-            <span>DATE</span>
-            <span>TIME</span>
-            <span>EVENT</span>
+                    border-bottom:2px solid #0242B3;margin-bottom:2px;
+                    font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">
+            <span>Date</span>
+            <span>Time</span>
             <span>CCY</span>
-            <span>IMPACT</span>
-            <span>ACTUAL</span>
-            <span>FORE / PREV</span>
+            <span>Event</span>
+            <span>Impact</span>
+            <span>Actual</span>
+            <span>Fore / Prev</span>
         </div>
     """, unsafe_allow_html=True)
 
-    for ev in filtered[:80]:
-        impact = ev.get("impact", "")
-        col    = IMPACT_COLORS.get(impact, "#555555")
-        title  = ev.get("title", "")
-        ccy    = ev.get("country", "").upper()
-        date   = ev.get("date", "")
-        actual = ev.get("actual", "")
-        fore   = ev.get("forecast", "")
-        prev   = ev.get("previous", "")
+    for ev in filtered[:120]:
+        impact   = ev.get("impact", "")
+        imp_col  = IMPACT_COLORS.get(impact, "#444")
+        title    = ev.get("title", "")
+        ccy      = str(ev.get("country", "")).upper()
+        raw_date = str(ev.get("date", ""))
+        actual   = ev.get("actual", "") or "—"
+        fore     = ev.get("forecast", "") or "—"
+        prev     = ev.get("previous", "") or "—"
 
-        # ── Date / time parsing ────────────────────────────────────────────────
-        date_part = ""
-        time_part = ""
-        try:
-            if date:
-                parts = str(date).replace("/", "-").split(" ")
-                d     = parts[0]
-                t     = parts[1] if len(parts) > 1 else ""
-                segs  = d.split("-")
-                if len(segs) == 3:
-                    if len(segs[0]) == 4:           # YYYY-MM-DD
-                        date_part = f"{segs[2]}/{segs[1]}/{segs[0][2:]}"
-                    else:                            # MM-DD-YYYY
-                        date_part = f"{segs[1]}/{segs[0]}/{segs[2][2:]}"
-                time_part = t[:5] if t else ""
-        except Exception:
-            date_part = str(date)
+        date_disp, time_disp = parse_ff_datetime(raw_date)
 
-        # FIX: date/time were colour:#888 (near-invisible on dark bg).
-        # Now using #C8D0D8 (clearly readable light grey).
+        row_bg = "rgba(255,51,51,0.06)" if impact == "High" else "transparent"
+
         st.markdown(f"""
             <div style="display:grid;
-                        grid-template-columns:90px 60px 1fr 55px 70px 80px 110px;
-                        gap:6px;padding:5px 0;border-bottom:1px solid #2E2E2E;
-                        font-family:'IBM Plex Mono';font-size:0.72rem;align-items:center;">
-                <span style="color:#C8D0D8;font-weight:500">{date_part}</span>
-                <span style="color:#C8D0D8;font-weight:500">{time_part}</span>
+                        grid-template-columns:80px 60px 50px 1fr 70px 70px 130px;
+                        gap:8px;padding:5px 4px;border-bottom:1px solid #222;
+                        font-family:'IBM Plex Mono';font-size:0.72rem;
+                        align-items:center;background:{row_bg}">
+                <span style="color:#C0C0C0;font-weight:500">{date_disp}</span>
+                <span style="color:#999">{time_disp}</span>
+                <span style="color:#E0E0E0;font-weight:700">{ccy}</span>
                 <span style="color:#E0E0E0">{title}</span>
-                <span style="color:#E0E0E0;font-weight:600">{ccy}</span>
-                <span style="color:{col};font-weight:600">{impact}</span>
-                <span style="color:#00CC66">{actual or "—"}</span>
-                <span style="color:#A0A8B0">{fore or "—"} / {prev or "—"}</span>
+                <span style="color:{imp_col};font-weight:600">{impact}</span>
+                <span style="color:#00CC66;font-weight:500">{actual}</span>
+                <span style="color:#888">{fore} / {prev}</span>
             </div>
         """, unsafe_allow_html=True)
 
-
-# ── Main render ────────────────────────────────────────────────────────────────
 def render():
     st.markdown("""
         <div class="page-header">
             <span class="page-title">News Feed</span>
-            <span class="page-subtitle">FT · Economist · WSJ · Reuters · Walter Bloomberg · ForexFactory</span>
+            <span class="page-subtitle">FT · Economist · WSJ · Reuters · Walter Bloomberg</span>
         </div>
     """, unsafe_allow_html=True)
 
-    tab_news, tab_wb, tab_cal = st.tabs([
-        "📰 Headlines",
-        "⚡ Walter Bloomberg",
-        "📅 Economic Calendar",
+    tab_news, tab_walter, tab_cal = st.tabs([
+        "News Headlines", "Walter Bloomberg (X)", "Economic Calendar"
     ])
 
-    # ── TAB 1: Headlines ───────────────────────────────────────────────────────
+    # ── NEWS ──────────────────────────────────────────────────────────────────
     with tab_news:
         c1, c2 = st.columns([2, 1])
         with c1:
-            selected_feeds = st.multiselect(
+            selected = st.multiselect(
                 "Sources", list(RSS_FEEDS.keys()),
                 default=["Financial Times", "The Economist",
-                         "Wall Street Journal", "Reuters Business"],
+                         "Wall Street Journal", "Reuters Business"]
             )
         with c2:
-            keyword = st.text_input("Filter keyword", placeholder="e.g. ECB, inflation")
+            keyword = st.text_input("Filter", placeholder="e.g. ECB, tariffs")
 
-        if not selected_feeds:
-            st.info("Select at least one source.")
-        else:
-            all_articles = []
-            with st.spinner("Fetching news…"):
-                for name in selected_feeds:
-                    arts = get_rss_feed(RSS_FEEDS[name])
-                    for a in arts:
-                        a["_source"] = name
-                    all_articles.extend(arts)
+        all_articles = []
+        with st.spinner("Fetching…"):
+            for name in selected:
+                arts = get_rss_feed(RSS_FEEDS[name])
+                for a in arts:
+                    a["_source"] = name
+                all_articles.extend(arts)
 
-                try:
-                    key = st.secrets.get("NEWS_API_KEY", "")
-                except Exception:
-                    key = os.environ.get("NEWS_API_KEY", "")
-                if key:
-                    api_arts = get_news(query="finance economy markets", page_size=20)
-                    for a in api_arts:
-                        a["_source"]   = a.get("source", {}).get("name", "NewsAPI")
-                        a["link"]      = a.get("url", "")
-                        a["published"] = a.get("publishedAt", "")
-                        a["summary"]   = a.get("description", "")
-                    all_articles.extend(api_arts)
+            try:
+                nk = st.secrets.get("NEWS_API_KEY", "")
+            except Exception:
+                nk = os.environ.get("NEWS_API_KEY", "")
+            if nk:
+                for a in get_news("finance economy markets", 20):
+                    a["_source"] = a.get("source", {}).get("name", "NewsAPI")
+                    a["link"]    = a.get("url", "")
+                    a["published"] = a.get("publishedAt", "")
+                    a["summary"] = a.get("description", "")
+                    all_articles.append(a)
 
-            if keyword:
-                kw = keyword.lower()
-                all_articles = [a for a in all_articles
-                                if kw in (a.get("title", "") + a.get("summary", "")).lower()]
+        if keyword:
+            kw = keyword.lower()
+            all_articles = [a for a in all_articles
+                            if kw in (a.get("title","") + a.get("summary","")).lower()]
 
-            if not all_articles:
-                st.warning("No articles found — RSS feeds may be rate-limited. Try again shortly.")
-            else:
-                st.markdown(
-                    f'<div style="font-family:IBM Plex Mono;font-size:0.7rem;'
-                    f'color:#777;margin-bottom:8px">{len(all_articles)} articles</div>',
-                    unsafe_allow_html=True,
-                )
-                for art in all_articles[:60]:
-                    render_article(art, art.get("_source", "—"))
-
-    # ── TAB 2: Walter Bloomberg ────────────────────────────────────────────────
-    with tab_wb:
-        st.markdown('<div class="bb-card-title">Walter Bloomberg — @DeItaone</div>',
+        st.markdown(f'<div style="font-family:IBM Plex Mono;font-size:0.7rem;'
+                    f'color:#555;margin-bottom:6px">{len(all_articles)} articles</div>',
                     unsafe_allow_html=True)
-        st.caption(
-            "Real-time Bloomberg terminal headlines posted on X by @DeItaone. "
-            "Fetched via Nitter public RSS (no API key required). "
-            "If mirrors are down, click 'Open on X' to view directly."
-        )
-        with st.spinner("Fetching @DeItaone feed…"):
-            render_walter_bloomberg()
+        for art in all_articles[:60]:
+            render_article(art, art.get("_source", "—"))
 
-    # ── TAB 3: Economic Calendar ───────────────────────────────────────────────
+    # ── WALTER BLOOMBERG ──────────────────────────────────────────────────────
+    with tab_walter:
+        st.markdown('<div class="bb-card-title">Walter Bloomberg · @DeItaone · Real-time market headlines</div>',
+                    unsafe_allow_html=True)
+        st.caption("Public Nitter RSS mirrors are unreliable. The embedded feed below is the most stable option.")
+
+        # Embed X/Twitter timeline via official embed (no API key needed, read-only public)
+        st.components.v1.html("""
+            <div style="background:#141414;border:1px solid #2E2E2E;border-radius:4px;
+                        max-height:600px;overflow-y:auto;padding:8px;">
+                <a class="twitter-timeline"
+                   data-theme="dark"
+                   data-chrome="noheader nofooter noborders"
+                   data-tweet-limit="20"
+                   href="https://twitter.com/DeItaone">
+                   Loading @DeItaone tweets...
+                </a>
+                <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+            </div>
+        """, height=620)
+
+        st.markdown("""
+            <div style="font-family:'IBM Plex Mono';font-size:0.7rem;color:#555;margin-top:8px">
+                If the feed doesn't load, open
+                <a href="https://x.com/DeItaone" target="_blank"
+                   style="color:#0353D9">x.com/DeItaone</a> directly.
+            </div>
+        """, unsafe_allow_html=True)
+
+    # ── ECONOMIC CALENDAR ─────────────────────────────────────────────────────
     with tab_cal:
-        st.markdown(
-            '<div class="bb-card-title">Economic Calendar — This Week · USD EUR CHF GBP JPY</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="bb-card-title">Economic Calendar — This Week · USD EUR CHF GBP JPY</div>',
+                    unsafe_allow_html=True)
+
+        if st.button("Refresh Calendar"):
+            st.cache_data.clear() if hasattr(st, "cache_data") else None
+
         with st.spinner("Loading calendar…"):
             events = get_forex_factory_calendar()
-        render_calendar(events)
-        st.caption("Source: ForexFactory · Updates hourly")
+
+        if not events:
+            st.warning("Calendar unavailable — ForexFactory may be temporarily blocking the request. "
+                       "Try refreshing in a few minutes.")
+        else:
+            # Debug: show raw date sample so we can verify parsing
+            with st.expander("Raw date sample (for debugging)", expanded=False):
+                st.code(str([e.get("date","") for e in events[:5]]))
+            render_calendar(events)
+
+        st.caption("Source: ForexFactory · High-impact events highlighted in red")
